@@ -33,8 +33,6 @@ This baseline serves as a reference point for further improvements.
 
 ---
 
----
-
 ## Author
 Sidh Virmani
 
