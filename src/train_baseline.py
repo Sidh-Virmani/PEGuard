@@ -10,10 +10,20 @@ from sklearn.metrics import accuracy_score, confusion_matrix, classification_rep
 #To know our accuracy
 #Confusion matrix to know malware vs benign errors
 #Classification report is for precision, F1, recall
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+#To do cross validation to make sure our model is not overfitting 
+from sklearn.model_selection import learning_curve      #For bias-variance diagnosis
+from sklearn.model_selection import GridSearchCV   #For finding the best C for hyperparameter tuning
+
+
+
 
 CSV_PATH = "dataset/PE_Dataset_Labeled.csv"
 
 df = pd.read_csv(CSV_PATH)
+
+df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+#Our data has first half as benign and second half as malware, shuffling it to ensure randomness
  
 # print(df.shape)         #Viewing the data and checking whether file works
 # print(df.columns)
@@ -63,15 +73,272 @@ pipeline.fit(X_train, y_train)     #does the 3 things in order
 
 y_pred = pipeline.predict(X_test)   #also does prediction after the pipeline steps
 
+print("------------------------------------------------------\n")
+print("Baseline Model Results:\n")
+
 print("Accuracy:", accuracy_score(y_test, y_pred))
+print("\nConfusion Matrix:")
 print(confusion_matrix(y_test, y_pred))
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+
+print("------------------------------------------------------\n")
+
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+#StratifiedKFold to ensure each fold has similar ratio of malware to benign as entire dataset
+#n_splits=5 splits data into 5 parts, each time using 1 part as test and rest 4 as train then rotates
+#shuffle to ensure randomness
+#freezing random state for reproducibility
+
+cv_scores = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy")
+
+print("\nCross-validation accuracy scores:", cv_scores)
+print("\nMean CV accuracy:", cv_scores.mean())
+print("\nStd CV accuracy:", cv_scores.std())
+
+
+#Results show our model is stable
+#To make it even better we start with bias-variance diagnosis
+
+
+train_sizes, train_scores, val_scores = learning_curve(
+    pipeline,
+    X,
+    y,
+    cv=cv,          #Table is sorted as in, almost first half is benign then second half is malware. So using cv = 5 will give error with 10% and 30% data, have to use stratiified k fold again to make they are in somewhat equal ratio
+    scoring="accuracy",
+    train_sizes=[0.1, 0.3, 0.5, 0.7, 1.0],   #Train data on 10%, 30%, 50%, 70% and 100% of data
+    n_jobs=-1                    #Idk what this line does but internet says it makes the code run faster by making it use all CPU cores
+)
+
+train_mean = train_scores.mean(axis=1)
+val_mean = val_scores.mean(axis=1)
+
+print("------------------------------------------------------\n")
+
+print("\nTraining accuracies:", train_mean)
+print("\nValidation accuracies:", val_mean)
+#Results show low bias and low variance, our model is good enough for baseline
+
+print("------------------------------------------------------\n")
+
+#C value in logisitic regression controls regularization
+#Lower C means more regularization, higher C means less regularization
+#If C too low then high bias, if C too high then high variance
+#We will use grid search to find the best C value for our model
+
+param_grid = {
+    "model__C": [0.001, 0.01, 0.1, 1, 10, 100]       #works on logarithmic scale so 1.0 to 1.1 is too tiny
+}
+
+grid = GridSearchCV(                       #To find the best C value from above list
+    pipeline,
+    param_grid=param_grid,        
+    cv=cv,
+    scoring="accuracy",
+    n_jobs=-1
+)
+
+grid.fit(X_train, y_train)
+
+print("\nBest C found:", grid.best_params_["model__C"])
+print("\nBest cross-validation accuracy:", grid.best_score_)
+
+# fine_grid = {                                       #finding more precise C value around the best C found
+#     "model__C": [0.003, 0.005, 0.01, 0.02, 0.03]
+# }
+
+#Instead of manually finding more precise C values, we can use which automatically finds the best C for us
+best_pipeline = grid.best_estimator_
+
+#but now we have to use this pipeline for the model rather than the previous pipeline
+
+#using best_pipeline for model fitting and prediction
+best_pipeline.fit(X_train, y_train)     
+y_pred = best_pipeline.predict(X_test)
+
+print("------------------------------------------------------\n")
+print("Baseline Model with Best C Results:\n")
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+print("\nClassification Report:")
 print(classification_report(y_test, y_pred))
 
 
+#Performing error analysis to see which files were misclassified
+y_test_array = y_test.values
+
+false_positives = np.where((y_test_array == "Benign") & (y_pred == "Malicious"))[0]
+
+false_negatives = np.where((y_test_array == "Malicious") & (y_pred == "Benign"))[0]
+
+print("\nError Analysis:")
+print("\nFalse Positives (Benign → Malicious):", len(false_positives))
+print("\nFalse Negatives (Malicious → Benign):", len(false_negatives))
+
+print("------------------------------------------------------\n")
 
 
+#We have done the following, very important and memorize for interviews/future projects
+
+# Data loading + leakage removal
+# Proper train/test split
+# Pipeline-based preprocessing
+# Baseline logistic regression
+# Cross-validation
+# Bias–variance check (learning curve)
+# Hyperparameter tuning (C)
+# Error analysis
+
+#Result of error analysis showed 83 dalse positives and 207 false negatives
+#But false negative is more dangerous since malware is classified as benign
+
+#Lets try training another model (could have made simple changes in old but want to keep old records + new ones since
+#this is for educational purposes) 
+#In this model we will use the concept of cost weight to penalize false negatives more than false positives
+
+cost_sensitive_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler()),
+    (
+        "model",
+        LogisticRegression(
+            max_iter=1000,
+            class_weight={"Benign": 1, "Malicious": 2}           #Penalizing false negatives more by giving more weight to Malicious class
+        )
+    )
+])
+
+# Step 2: Train this new model
+cost_sensitive_pipeline.fit(X_train, y_train)
+
+# Step 3: Predict
+y_pred_cs = cost_sensitive_pipeline.predict(X_test)
+
+# Step 4: Evaluate
+print("Cost-Sensitive Model Results:\n")
+
+print("Accuracy:", accuracy_score(y_test, y_pred_cs))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred_cs))
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred_cs))
+
+# Step 5: Error analysis
+y_test_array = y_test.values
+
+false_positives_cs = np.where(
+    (y_test_array == "Benign") & (y_pred_cs == "Malicious")
+)[0]
+
+false_negatives_cs = np.where(
+    (y_test_array == "Malicious") & (y_pred_cs == "Benign")
+)[0]
+
+print("\nError Analysis (Cost-Sensitive):")
+print("\nFalse Positives (Benign → Malicious):", len(false_positives_cs))
+print("\nFalse Negatives (Malicious → Benign):", len(false_negatives_cs))
+
+print("------------------------------------------------------\n")
+
+#Result is 
+#New false positives: 272
+#New false negatives: 117
+
+#Lets find a good optimal tradeoff between false positives and false negatives 
+#We can try different class weights and see which gives the best tradeoff
+
+weights_to_try = [1, 2, 3, 5]
+
+for w in weights_to_try:
+    print(f"\n--- Testing class_weight Malicious={w} ---")
+
+    weighted_pipeline = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        (
+            "model",
+            LogisticRegression(
+                max_iter=1000,
+                class_weight={"Benign": 1, "Malicious": w}
+            )
+        )
+    ])
+
+    weighted_pipeline.fit(X_train, y_train)
+    y_pred_w = weighted_pipeline.predict(X_test)
+
+    cm = confusion_matrix(y_test, y_pred_w)
+    fn = cm[1, 0]   # Malicious → Benign
+    fp = cm[0, 1]   # Benign → Malicious
+
+    print("False Negatives:", fn)
+    print("False Positives:", fp)
+    print("Malicious Recall:",
+          classification_report(y_test, y_pred_w, output_dict=True)
+          ["Malicious"]["recall"])
+    
+    
+#Results:
+# class_weight Malicious=1 
+# False Negatives: 162
+# False Positives: 151
+# Malicious Recall: 0.9475048606610499
+
+# class_weight Malicious=2
+# False Negatives: 117
+# False Positives: 272
+# Malicious Recall: 0.9620868438107583
 
 
+# class_weight Malicious=3
+# False Negatives: 83
+# False Positives: 423
+# Malicious Recall: 0.9731043421905379
 
+# class_weight Malicious=5
+# False Negatives: 46
+# False Positives: 445
+# Malicious Recall: 0.9850939727802981
 
+#Depending on use case we can choose the class weight accordingly
+#For now, we will choose class_weight Malicious=3 as it gives a good tradeoff
 
+print("------------------------------------------------------\n")
+
+FINAL_MALICIOUS_WEIGHT = 3
+
+final_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler()),
+    (
+        "model",
+        LogisticRegression(
+            max_iter=1000,
+            C=grid.best_params_["model__C"],
+            class_weight={"Benign": 1, "Malicious": FINAL_MALICIOUS_WEIGHT}
+        )
+    )
+])
+
+final_pipeline.fit(X_train, y_train)
+final_pred = final_pipeline.predict(X_test)
+
+print("\nFinal Model Results (Cost-Sensitive):")
+print("\nAccuracy:", accuracy_score(y_test, final_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, final_pred))
+print("\nClassification Report:")
+print(classification_report(y_test, final_pred))
+
+print("------------------------------------------------------\n")
+
+#Final results:
+#Accuracy dropped to 0.924 but false dropped from 207 to 83
+#False positives increased from 272 to 423 but this is acceptable since false negatives are more dangerous
+#Missing malware is worse than falsely flagging benign files
+
+#End of baseline model training
