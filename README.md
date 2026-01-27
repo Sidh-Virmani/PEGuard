@@ -78,6 +78,17 @@ Because **false negatives (missed malware)** are more dangerous than false posit
 
 ---
 
+### Decision Analysis (ROC, PR, Threshold)
+
+- ROC-AUC ≈ 0.98 indicates strong ranking ability
+- PR-AUC ≈ 0.98 confirms operational usability
+- Explicit threshold analysis performed
+- Threshold = 0.6 selected as baseline operating point:
+  - Malware recall ≈ 96.4%
+  - False positives significantly lower than at default 0.5
+
+---
+
 ## Planned Next Steps
 
 - Compare against non-linear models (tree-based, ensemble methods)
