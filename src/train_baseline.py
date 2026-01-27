@@ -14,7 +14,9 @@ from sklearn.model_selection import StratifiedKFold, cross_val_score
 #To do cross validation to make sure our model is not overfitting 
 from sklearn.model_selection import learning_curve      #For bias-variance diagnosis
 from sklearn.model_selection import GridSearchCV   #For finding the best C for hyperparameter tuning
-
+from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.metrics import precision_recall_curve, average_precision_score
+#For ROC-AUC and Precision-Recall AUC calculations to later compare models
 
 
 
@@ -193,7 +195,7 @@ print("------------------------------------------------------\n")
 # Hyperparameter tuning (C)
 # Error analysis
 
-#Result of error analysis showed 83 dalse positives and 207 false negatives
+#Result of error analysis showed 83 false positives and 207 false negatives
 #But false negative is more dangerous since malware is classified as benign
 
 #Lets try training another model (could have made simple changes in old but want to keep old records + new ones since
@@ -340,5 +342,106 @@ print("------------------------------------------------------\n")
 #Accuracy dropped to 0.924 but false dropped from 207 to 83
 #False positives increased from 272 to 423 but this is acceptable since false negatives are more dangerous
 #Missing malware is worse than falsely flagging benign files
+
+#ROC-AUC AND PR ANALYSIS:
+
+#ROC is a measure of how fast the false alarms increase as we increase strictness of catching malware
+#PR is a measure of how precise our model is when it comes to catching malware. Basically how often is the model right
+#when it says a file is malware
+
+y_prob = final_pipeline.predict_proba(X_test) 
+#For each test sample, gives probability of being in each class in the following format:
+#[probability_of_Benign , probability_of_Malicious]
+#We dont know if its gonna be [P(benign), P(Malicious)] or [P(Malicious), P(Benign)] hence we have to find Malicious index lol
+
+classes = final_pipeline.named_steps["model"].classes_
+print("Class order:", classes)
+malicious_index = list(classes).index("Malicious")
+malware_scores = y_prob[:, malicious_index]
+#Getting the probabilities of being Malicious for each test sample
+
+fpr, tpr, roc_thresholds = roc_curve(
+    y_test,
+    malware_scores,
+    pos_label="Malicious"
+)
+
+roc_auc = roc_auc_score(
+    (y_test == "Malicious").astype(int),
+    malware_scores
+)
+
+print("\nROC-AUC:", roc_auc)
+#ROC full form is Receiver Operating Characteristic
+#ROC-AUC means Area Under the Curve for ROC curve
+#Higher the ROC-AUC better the model is (from 0 to 1)
+#The value denotes "How much more is a malware file likely to be assigned a higher score of being malware than a benign file"
+#0.5 means guessing, 0.8 means 80% better than guessing, 1.0 means perfect model
+
+#Precision: Out of all files we flagged as malware, how many were actually malware?
+#TP/(TP+FP)
+#If 0.6 then 60% of all files flagged as malware were actually malware
+
+#Recall: Out of all actual malware files, how many did we catch?
+#TP/(TP+FN)
+#If 0.95 then 95% of all malware files were caught
+
+#It is only good that BOTH precision and recall are high, if one is high and other is low then there is some logical error, think
+
+precision, recall, pr_thresholds = precision_recall_curve(
+    (y_test == "Malicious").astype(int),
+    malware_scores
+)
+
+pr_auc = average_precision_score(
+    (y_test == "Malicious").astype(int),
+    malware_scores
+)
+
+print("PR-AUC (Average Precision):", pr_auc)
+#If PR-AUC is much lower than ROC-AUC, false positives explode when catching more malware
+
+#The scores given by model needs to have a threshold to classify as malware or benign
+#By default its 0.5, meaning if P(Malicious) > 0.5 then classify as Malicious else Benign
+#But we can change this threshold to increase/decrease precision/recall as per our needs
+
+#Lets try to find the best threshold
+print("\nThreshold behavior:\n")
+
+for thr in [0.9, 0.7, 0.6, 0.5, 0.4, 0.3, 0.1]:
+    preds = np.where(malware_scores >= thr, "Malicious", "Benign")
+
+    cm = confusion_matrix(
+        y_test,
+        preds,
+        labels=["Benign", "Malicious"]
+    )
+
+    tn, fp, fn, tp = cm.ravel()
+
+    precision_val = tp / (tp + fp) if (tp + fp) else 0
+    recall_val = tp / (tp + fn) if (tp + fn) else 0
+    fpr_val = fp / (fp + tn) if (fp + tn) else 0
+
+    print(
+        f"Threshold={thr} | "
+        f"Precision={precision_val:.3f} | "
+        f"Recall={recall_val:.3f} | "
+        f"FPR={fpr_val:.3f} | "
+        f"FP={fp} FN={fn}"
+    )
+
+
+#Final results show that at threshold 0.6 and 0.5 we get a good balance of precision and recall
+#Threshold=0.6 | Precision=0.921 | Recall=0.964 | FPR=0.068 | FP=255 FN=110
+#Threshold=0.5 | Precision=0.875 | Recall=0.971 | FPR=0.115 | FP=429 FN=88
+
+#Choosing threshold=0.6 for final model as it gives a good balance since at 0.5 FP explodes
+
+#Can any other Model of feature engineering + data manipulation beat this baseline?
+
+#Next goal: Can Random Forest achieve recall ≥ 0.964 with FP < 255?
+
+
 
 #End of baseline model training
