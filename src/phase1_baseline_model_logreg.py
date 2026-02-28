@@ -20,7 +20,7 @@ from sklearn.metrics import precision_recall_curve, average_precision_score
 
 
 
-CSV_PATH = "dataset/PE_Dataset_Labeled.csv"
+CSV_PATH = "../dataset/PE_Dataset_Labeled.csv"
 
 df = pd.read_csv(CSV_PATH)
 
