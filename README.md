@@ -78,24 +78,31 @@ Because **false negatives (missed malware)** are more dangerous than false posit
 
 ---
 
-### Decision Analysis (ROC, PR, Threshold)
+## Random Forest Robustness Analysis
 
-- ROC-AUC ≈ 0.98 indicates strong ranking ability
-- PR-AUC ≈ 0.98 confirms operational usability
-- Explicit threshold analysis performed
-- Threshold = 0.6 selected as baseline operating point:
-  - Malware recall ≈ 96.4%
-  - False positives significantly lower than at default 0.5
+Random Forest initially achieved:
 
----
+- ROC-AUC ≈ 0.999  
+- PR-AUC ≈ 0.998  
+- Accuracy ≈ 99%
 
-## Planned Next Steps
+Feature importance analysis revealed heavy reliance on version/build metadata
+(e.g., linker version, OS version, subsystem version).
 
-- Compare against non-linear models (tree-based, ensemble methods)
-- Feature engineering (hex fields, PE section statistics)
-- Threshold tuning and ROC / PR analysis
-- Feature importance and interpretability
-- Robustness and failure-case analysis
+To test robustness, controlled ablation experiments were performed:
+
+- Removing linker features → slight performance drop (ROC-AUC ≈ 0.997)
+- Removing all version metadata → significant drop:
+  - ROC-AUC ≈ 0.982  
+  - Accuracy ≈ 92%
+
+### Insight
+
+A substantial portion of performance is influenced by build-environment
+metadata rather than purely structural malicious characteristics.
+
+This suggests dataset-level bias and motivates further robustness testing
+under metadata perturbation.
 
 ---
 
